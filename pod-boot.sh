@@ -16,6 +16,9 @@
 #                   and pushed to NTFY_TOPIC if set).
 #   TS_HOSTNAME     Tailnet name for the pod (default: gpu-ollama)
 #   TS_TAGS         Tags to advertise (default: tag:gpu). Required with an OAuth secret.
+#   TS_EPHEMERAL    true/false (default: false). Only for an OAuth secret. The free plan
+#                   allows 1,000 ephemeral-device minutes a month, so the default is a
+#                   normal device; the name cleanup below removes the old one instead.
 #   TS_OAUTH_CLIENT_ID  OAuth client ID (not secret). With an OAuth secret in TS_AUTHKEY,
 #                   enables freeing TS_HOSTNAME first: any *offline* device with that
 #                   exact name and one of TS_TAGS is deleted, so the pod keeps the name
@@ -166,8 +169,8 @@ elif [[ -n "$TS_AUTHKEY" ]]; then
   key="$TS_AUTHKEY"
   extra=()
   if [[ "$key" == tskey-client-* ]]; then
-    # OAuth client secret: ask for an ephemeral, pre-approved node. Tags are required.
-    [[ "$key" == *\?* ]] || key="${key}?ephemeral=true&preauthorized=true"
+    # OAuth client secret: pre-approved node, ephemeral only if asked. Tags are required.
+    [[ "$key" == *\?* ]] || key="${key}?ephemeral=${TS_EPHEMERAL:-false}&preauthorized=true"
     extra+=(--advertise-tags="$TS_TAGS")
   fi
   # Pass the key through a private file, so it isn't in the process list.

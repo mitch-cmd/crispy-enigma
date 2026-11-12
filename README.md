@@ -29,6 +29,7 @@ bash -c 'curl -fsSL https://raw.githubusercontent.com/mitch-cmd/crispy-enigma/<c
 | `TS_OAUTH_CLIENT_ID` | `k123…` | Needed for the step that frees the hostname (see below). |
 | `TS_HOSTNAME` | `gpu-ollama-v2` | The pod's name on the tailnet. |
 | `TS_TAGS` | `tag:gpu` | The default. |
+| `TS_EPHEMERAL` | `false` | The default. Only applies to an OAuth secret. The free plan allows 1,000 ephemeral-device minutes a month, so pods join as normal devices and the hostname step removes old ones. |
 | `BOOT_BASE_URL` | `https://raw.githubusercontent.com/mitch-cmd/crispy-enigma/<commit-sha>` | Where `setup-gpu-ollama.sh` is fetched from. |
 | `MODEL` | `gpt-oss:120b` | Optional. If set, Ollama is set up with this model. |
 | `CONTEXT_LENGTH` | `131072` | Optional. |
