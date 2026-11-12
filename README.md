@@ -30,6 +30,7 @@ bash -c 'curl -fsSL https://raw.githubusercontent.com/mitch-cmd/crispy-enigma/<c
 | `TS_HOSTNAME` | `gpu-ollama-v2` | The pod's name on the tailnet. |
 | `TS_TAGS` | `tag:gpu` | The default. |
 | `TS_EPHEMERAL` | `false` | The default. Only applies to an OAuth secret. The free plan allows 1,000 ephemeral-device minutes a month, so pods join as normal devices and the hostname step removes old ones. |
+| `TS_IPV4` | `100.100.99.121` | Optional. Gives every pod this tailnet IP (set through the API after joining), so clients' cached DNS never points at an old pod. Needs the OAuth setup. |
 | `BOOT_BASE_URL` | `https://raw.githubusercontent.com/mitch-cmd/crispy-enigma/<commit-sha>` | Where `setup-gpu-ollama.sh` is fetched from. |
 | `MODEL` | `gpt-oss:120b` | Optional. If set, Ollama is set up with this model. |
 | `CONTEXT_LENGTH` | `131072` | Optional. |
@@ -40,6 +41,10 @@ bash -c 'curl -fsSL https://raw.githubusercontent.com/mitch-cmd/crispy-enigma/<c
 ## Keeping the same hostname
 
 Each pod is a new Tailscale device. If a device with the same name is still in the tailnet, the new pod becomes `<name>-1`. When `TS_AUTHKEY` holds an OAuth client secret and `TS_OAUTH_CLIENT_ID` is set, `pod-boot.sh` first deletes **offline** devices with exactly `TS_HOSTNAME` that carry one of `TS_TAGS`. It never touches untagged devices, and it leaves online ones alone unless `TS_REPLACE_ONLINE=1`.
+
+## Keeping the same IP
+
+Each pod is a new device, so it normally gets a new tailnet IP, and clients that cached the old DNS answer can't reach it (on macOS: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`). With `TS_IPV4` set, `pod-boot.sh` changes the new pod's address to that IP once the old device has been deleted. If that fails, the pod keeps the address it was given.
 
 ## Tailscale setup
 

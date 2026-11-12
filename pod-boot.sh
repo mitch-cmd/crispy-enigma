@@ -24,6 +24,10 @@
 #                   exact name and one of TS_TAGS is deleted, so the pod keeps the name
 #                   instead of becoming <name>-1. Client needs scopes auth_keys + devices:core.
 #   TS_REPLACE_ONLINE  1 = also delete a matching device that is still online.
+#   TS_IPV4         Optional fixed tailnet IPv4 (e.g. 100.100.99.121). After joining, the
+#                   pod's address is changed to this via the API, so every pod has the
+#                   same IP and cached DNS on clients never goes stale. Needs the same
+#                   OAuth setup as the name cleanup, and the old device must be gone.
 #   TS_CLEANUP_DRY_RUN 1 = only log which devices would be deleted.
 #   NTFY_TOPIC      Optional ntfy.sh topic for "pod is up" / login-link messages.
 #   MODEL           If set, run setup-gpu-ollama.sh --model "$MODEL" afterwards.
@@ -127,6 +131,61 @@ if not matched:
 PY
 }
 
+# Change this device's tailnet IPv4 to TS_IPV4, via the Tailscale API.
+# Best effort: on any problem the pod keeps the address it was given.
+pin_ipv4() {
+  [[ -n "${TS_IPV4:-}" ]] || return 0
+  local current
+  current="$(tailscale ip -4 2>/dev/null | head -1)"
+  if [[ "$current" == "$TS_IPV4" ]]; then
+    log "tailnet IP already ${TS_IPV4}"; return 0
+  fi
+  if [[ "$TS_AUTHKEY" != tskey-client-* || -z "${TS_OAUTH_CLIENT_ID:-}" ]] || ! command -v python3 >/dev/null; then
+    log "IP pinning skipped: needs an OAuth secret, TS_OAUTH_CLIENT_ID and python3"; return 0
+  fi
+  log "changing tailnet IP ${current} -> ${TS_IPV4}"
+  if ! _TS_SECRET="$TS_AUTHKEY" TS_OAUTH_CLIENT_ID="$TS_OAUTH_CLIENT_ID" \
+       TS_IPV4="$TS_IPV4" TS_CURRENT_IP="$current" \
+       python3 -I - <<'PY' 2>&1 | sed 's/^/    /'
+import json, os, sys, urllib.error, urllib.parse, urllib.request
+API = "https://api.tailscale.com/api/v2"
+def call(method, url, form=None, js=None, token=None):
+    headers, body = {}, None
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if form is not None:
+        body = urllib.parse.urlencode(form).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    if js is not None:
+        body = json.dumps(js).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        raw = resp.read()
+        return json.loads(raw) if raw else None
+try:
+    token = call("POST", f"{API}/oauth/token", form={
+        "client_id": os.environ["TS_OAUTH_CLIENT_ID"],
+        "client_secret": os.environ["_TS_SECRET"].split("?", 1)[0]})["access_token"]
+    devices = call("GET", f"{API}/tailnet/-/devices", token=token)["devices"]
+    me = next((d for d in devices if os.environ["TS_CURRENT_IP"] in (d.get("addresses") or [])), None)
+    if me is None:
+        print("couldn't find this device in the API's device list"); sys.exit(1)
+    call("POST", f"{API}/device/{me['id']}/ip", js={"ipv4": os.environ["TS_IPV4"]}, token=token)
+    print(f"requested {os.environ['TS_IPV4']} for {me['name']}")
+except urllib.error.HTTPError as e:
+    print(f"API error {e.code}: {e.read()[:200].decode(errors='replace')}"); sys.exit(1)
+PY
+  then
+    log "IP pinning failed; keeping ${current}"; return 0
+  fi
+  for _ in $(seq 1 30); do
+    [[ "$(tailscale ip -4 2>/dev/null | head -1)" == "$TS_IPV4" ]] && { log "tailnet IP now ${TS_IPV4}"; return 0; }
+    sleep 1
+  done
+  log "API accepted ${TS_IPV4} but the pod still shows $(tailscale ip -4 | head -1); check the admin console"
+}
+
 # ---------- 1. install ----------
 if ! command -v tailscaled >/dev/null; then
   log "installing tailscale"
@@ -177,10 +236,12 @@ elif [[ -n "$TS_AUTHKEY" ]]; then
   keyfile="$(mktemp)"; chmod 600 "$keyfile"
   trap 'rm -f "$keyfile"' EXIT
   printf '%s' "$key" > "$keyfile"
-  unset key TS_AUTHKEY
-  timeout 60 tailscale up --hostname="$TS_HOSTNAME" --auth-key="file:${keyfile}" "${extra[@]}" \
+  unset key
+  timeout 60 env -u TS_AUTHKEY tailscale up --hostname="$TS_HOSTNAME" --auth-key="file:${keyfile}" "${extra[@]}" \
     || fail "tailscale up with auth key failed"
   rm -f "$keyfile"
+  pin_ipv4
+  unset TS_AUTHKEY
 else
   # No key: today's flow. Run `tailscale up` in the background so it waits for
   # approval without being killed, and surface the login link.
